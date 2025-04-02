@@ -1,0 +1,12 @@
+---
+source: {{ .Source }}
+message_id: {{ .MessageID }}
+tags:
+{{- range .Tags }}
+  - {{ . }}
+{{- end }}
+created: {{ .Created }}
+modified: {{ .Modified }}
+---
+
+{{ .Content }}
