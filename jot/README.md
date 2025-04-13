@@ -1,9 +1,12 @@
 # jot
 
-A small tool for jotting down notes from Telegram.
+A small tool for jotting down notes from Telegram to Obsidian via Syncthing.
 
 I wanted something like Telegram's "saved messages", but to be able to
 forward the messages to my notes, which I manage in [Obsidian](https://obsidian.md/).
+
+I knew there were plugins for Obsidian to run a Telgram bot, but I didn't another plugin,
+which I already have a lot.
 
 The idea is:
 
@@ -14,3 +17,14 @@ The idea is:
 - they are both pointed to the same volume (folder)
 - the utility saves the messages in a certain format with a front-matter
 - if you edit the message, it is updated in the folder as well
+
+## How to
+
+```
+TELEGRAM_BOT_TOKEN=0000000:aaaaaaaeeeeeeeeeeee
+BOT_ADMIN_ID=000000000
+INBOX_PATH=messages
+FILENAME_TEMPLATE=inbox_20060102_150405.md
+```
+
+
