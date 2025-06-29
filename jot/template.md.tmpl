@@ -1,12 +1,15 @@
 ---
+summary: |
+{{ .Content }}
 source: {{ .Source }}
-message_id: {{ .MessageID }}
+sender: {{ .From }}
+aliases:
 tags:
-{{- range .Tags }}
-  - {{ . }}
-{{- end }}
+  - task
+  - telegram
+completed:
 created: {{ .Created }}
 modified: {{ .Modified }}
 ---
 
-{{ .Content }}
+`BUTTON[done]`

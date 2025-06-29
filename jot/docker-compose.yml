@@ -9,7 +9,7 @@ services:
     volumes:
       - ./data:/app/data
     environment:
-      - TELEGRAM_BOT_TOKEN=0000000:aaaaaaaeeeeeeeeeeee
-      - BOT_ADMIN_ID=000000000
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - BOT_ADMIN_ID=${BOT_ADMIN_ID}
       - INBOX_PATH=messages
       - FILENAME_TEMPLATE=inbox_20060102_150405.md

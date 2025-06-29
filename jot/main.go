@@ -60,45 +60,61 @@ func main() {
 
 func handler(saveDir string, filenameTemplate string) func(tele.Context) error {
 	return func(c tele.Context) error {
-		saveMessage(c.Message(), saveDir, filenameTemplate)
+		err := saveMessage(c.Message(), saveDir, filenameTemplate)
+		if err != nil {
+			return err
+		}
+		c.Bot().Delete(c.Message())
 		return nil
 	}
 }
 
 type MessageContext struct {
-	Source    string
-	MessageID int
-	Tags      []string
-	Created   string
-	Modified  string
-	Content   string
+	Source   string
+	Created  string
+	Modified string
+	Content  string
+	From     string
 }
 
-func saveMessage(m *tele.Message, saveDir string, filenameTemplate string) {
+func saveMessage(m *tele.Message, saveDir string, filenameTemplate string) error {
 	filename := m.Time().Format(filenameTemplate)
 	filepath := filepath.Join(saveDir, filename)
 	tmpl, err := template.ParseFiles("template.md.tmpl")
 	if err != nil {
 		log.Printf("Error parsing template: %v", err)
-		return
+		return err
 	}
 	context := MessageContext{
-		Source:    "telegram",
-		MessageID: m.ID,
-		Tags:      []string{"telegram", "inbox"},
-		Created:   m.Time().Format(time.RFC3339),
-		Modified:  time.Now().Format(time.RFC3339),
-		Content:   m.Text,
+		Source:   "telegram",
+		Created:  m.Time().Format(time.RFC3339),
+		Modified: time.Now().Format(time.RFC3339),
+		Content:  formatYamlContent(m.Text),
+		From:     m.OriginalSender.Username,
 	}
 
 	var content strings.Builder
 	if err := tmpl.Execute(&content, context); err != nil {
 		log.Printf("Error executing template: %v", err)
-		return
+		return err
 	}
 	if err := os.WriteFile(filepath, []byte(content.String()), 0644); err != nil {
 		log.Printf("Error saving message to file: %v", err)
-	} else {
-		log.Printf("Message saved to %s", filepath)
+		return err
 	}
+	log.Printf("Message saved to %s", filepath)
+	return nil
+}
+
+func formatYamlContent(content string) string {
+	// Trim trailing whitespace and split by newlines
+	lines := strings.Split(strings.TrimSpace(content), "\n")
+
+	// Add two-space indentation to each line
+	for i, line := range lines {
+		lines[i] = "  " + line
+	}
+
+	// Join back with newlines
+	return strings.Join(lines, "\n")
 }

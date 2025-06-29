@@ -1,30 +1,77 @@
-# jot
+# Jot
 
-A small tool for jotting down notes from Telegram to Obsidian via Syncthing.
+A Telegram bot that automatically saves messages to markdown files with YAML frontmatter for seamless integration with Obsidian via Syncthing.
 
-I wanted something like Telegram's "saved messages", but to be able to
-forward the messages to my notes, which I manage in [Obsidian](https://obsidian.md/).
+## Features
 
-I knew there were plugins for Obsidian to run a Telgram bot, but I didn't another plugin,
-which I already have a lot.
+- **Telegram bot**: Receives messages and saves them as markdown files
+- **YAML frontmatter**: Structured metadata including source, sender, timestamps, and tags
+- **Template-based**: Uses customizable markdown templates
+- **Docker-ready**: Containerized for easy deployment
+- **Admin-only**: Whitelist-based access control
+- **Message editing**: Handles edited messages and updates files accordingly
+- **Auto-cleanup**: Deletes messages from Telegram after saving
 
-The idea is:
+## Usage
 
-- there is a Telegram bot
-- you send message to a bot and it saves it to `inbox` folder
-- the bot is running in a Docker container
-- there is also a [Syncthing](https://syncthing.net/) instance, also in a Docker container
-- they are both pointed to the same volume (folder)
-- the utility saves the messages in a certain format with a front-matter
-- if you edit the message, it is updated in the folder as well
+### Environment Variables
 
-## How to
-
-```
-TELEGRAM_BOT_TOKEN=0000000:aaaaaaaeeeeeeeeeeee
-BOT_ADMIN_ID=000000000
-INBOX_PATH=messages
+```bash
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+BOT_ADMIN_ID=your_telegram_user_id
+INBOX_PATH=/path/to/save/messages
 FILENAME_TEMPLATE=inbox_20060102_150405.md
 ```
+
+### Docker
+
+```bash
+docker-compose up -d
+```
+
+### Local
+
+```bash
+go run main.go
+```
+
+## Message Format
+
+Messages are saved as markdown files with YAML frontmatter:
+
+```yaml
+---
+summary: |
+  Your message content here
+source: telegram
+sender: your_username
+aliases:
+tags:
+  - task
+  - telegram
+completed:
+created: 2024-01-01T12:00:00Z
+modified: 2024-01-01T12:00:00Z
+---
+```
+
+## Workflow
+
+1. Send message to Telegram bot
+2. Bot saves message to `INBOX_PATH` with timestamped filename
+3. Syncthing syncs files to your Obsidian vault
+4. Message is automatically deleted from Telegram
+5. Edit messages in Telegram to update the saved file
+
+## Dependencies
+
+- `telebot.v4` - Telegram bot framework
+- Go 1.24.1+
+
+## Integration
+
+Designed to work with:
+- **Obsidian**: For note management and viewing
+- **Syncthing**: For file synchronization between devices
 
 
