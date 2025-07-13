@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Notes App</title>
+    <script src="https://cdn.jsdelivr.net/npm/vue@2/dist/vue.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pouchdb@8.0.1/dist/pouchdb.min.js"></script>
+</head>
+<body>
+    <div id="app">
+        <h1>Notes</h1>
+        <ul>
+            <li v-for="note in notes" :key="note.id">
+                <input v-model="note.content" @blur="saveNote(note)">
+            </li>
+        </ul>
+        <button @click="addNote">Add Note</button>
+    </div>
+
+    <script>
+        var localDB = new PouchDB('notes');
+        var remoteDB = new PouchDB('https://example.com/db');
+
+        localDB.sync(remoteDB, { live: true, retry: true });
+
+        new Vue({
+            el: '#app',
+            data: {
+                notes: []
+            },
+            methods: {
+                loadNotes() {
+                    localDB.allDocs({ include_docs: true }).then(result => {
+                        this.notes = result.rows.map(row => ({ id: row.id, content: row.doc.content }));
+                    });
+                },
+                saveNote(note) {
+                    localDB.get(note.id).then(doc => {
+                        doc.content = note.content;
+                        return localDB.put(doc);
+                    });
+                },
+                addNote() {
+                    const newNote = { _id: 'note' + Date.now(), content: 'New note' };
+                    localDB.put(newNote).then(() => {
+                        this.notes.push({ id: newNote._id, content: newNote.content });
+                    });
+                }
+            },
+            created() {
+                this.loadNotes();
+                localDB.changes({ since: 'now', live: true, include_docs: true }).on('change', change => {
+                    this.loadNotes();
+                });
+            }
+        });
+    </script>
+</body>
+</html> 

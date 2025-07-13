@@ -1,0 +1,10 @@
+ignore:
+  - "test"
+  - "internal/mock"
+  - "internal/nettest"
+
+coverage:
+  status:
+    project:
+      default:
+        informational: true
