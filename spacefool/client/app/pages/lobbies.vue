@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { shallowRef, computed, watch, watchEffect, onMounted, onUnmounted, reactive } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { DbConnection, Lobby, User } from '../../module_bindings';
 import { Identity } from '@clockworklabs/spacetimedb-sdk';
 
@@ -134,6 +135,42 @@ onMounted(() => {
       .build()
   );
 });
+
+// If we join a lobby, navigate into it
+watch(
+  () => currentUser.value?.currentLobbyId,
+  (newLobbyId) => {
+    if (newLobbyId) {
+      // BigInt to string
+      // @ts-ignore
+      const idStr = newLobbyId.toString();
+      // Navigate to lobby page
+      // Avoid duplicate navigation if already in that route
+      const route = useRoute();
+      const router = useRouter();
+      if (route.path !== `/lobby/${idStr}`) {
+        router.push(`/lobby/${idStr}`);
+      }
+    }
+  }
+);
+
+// Auto-join flow: when Quick Play (cpu_mode) created a lobby, ensure we immediately join it
+watch(
+  () => lobbies.value,
+  (list) => {
+    if (localStorage.getItem('cpu_mode') === '1' && currentUser.value && !currentUser.value.currentLobbyId) {
+      // Prefer a lobby we created; otherwise any waiting lobby with 1 player
+      const myHex = currentUser.value.identity.toHexString();
+      const myLobby = list.find(l => l.creator.toHexString() === myHex && l.status.tag === 'Waiting');
+      const candidate = myLobby || list.find(l => l.status.tag === 'Waiting' && Number(l.currentPlayers) === 1);
+      if (candidate) {
+        joinLobby(candidate.id);
+      }
+    }
+  },
+  { deep: true }
+);
 
 onUnmounted(() => {
   // Clean up all event handlers

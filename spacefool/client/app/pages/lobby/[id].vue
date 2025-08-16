@@ -13,6 +13,9 @@ const lobbyId = computed(() => BigInt(route.params.id as string));
 const connected = shallowRef<boolean>(false);
 const identity = shallowRef<Identity | null>(null);
 const conn = shallowRef<DbConnection | null>(null);
+// CPU bot connection (hidden)
+const botConn = shallowRef<DbConnection | null>(null);
+const botIdentityHex = shallowRef<string | null>(null);
 
 // Data state
 const lobbies = shallowRef<Lobby[]>([]);
@@ -23,6 +26,7 @@ const gameSettings = shallowRef<GameSettings | null>(null);
 // UI state
 const showSettings = shallowRef(false);
 const settingName = shallowRef(false);
+const isCpuMode = computed(() => typeof localStorage !== 'undefined' && localStorage.getItem('cpu_mode') === '1');
 
 // Form states
 const nameForm = reactive({
@@ -153,7 +157,45 @@ onMounted(() => {
       .onConnectError(onConnectError)
       .build()
   );
+
+  // If quick play requested, spawn CPU connection and orchestrate
+  if (localStorage.getItem('cpu_mode') === '1') {
+    const onBotConnect = (connInstance: DbConnection, botId: Identity, token: string) => {
+      botIdentityHex.value = botId.toHexString();
+      try { localStorage.setItem('cpu_bot_id', botIdentityHex.value); } catch (_) {}
+      try { localStorage.setItem('cpu_bot_token', token); } catch (_) {}
+      // Give the bot a name (best-effort)
+      connInstance.reducers.setName('CPU');
+      // Try to join this lobby
+      // Delay a tick to ensure route param computed
+      setTimeout(() => {
+        try { connInstance.reducers.joinLobby(lobbyId.value); } catch (_) {}
+      }, 50);
+    };
+    const onBotDisconnect = () => {};
+    const onBotError = (_ctx: any, _err: Error) => {};
+    botConn.value = (
+      DbConnection.builder()
+        .withUri('ws://localhost:3000')
+        .withModuleName('spacefool')
+        // Intentionally omit token + do NOT touch localStorage
+        .onConnect(onBotConnect)
+        .onDisconnect(onBotDisconnect)
+        .onConnectError(onBotError)
+        .build()
+    );
+  }
 });
+
+// Navigate to game when current user gets a gameId
+watch(
+  () => currentUser.value?.currentGameId,
+  (newGameId) => {
+    if (newGameId) {
+      router.push(`/game/${newGameId.toString()}`);
+    }
+  }
+);
 
 onUnmounted(() => {
   // Clean up all event handlers
@@ -193,6 +235,17 @@ const startGame = () => {
     conn.value?.reducers.startGame(currentLobby.value.id);
   }
 };
+
+// Auto-start when CPU has joined and we are creator
+watch(
+  () => ({ count: lobbyPlayers.value.length, status: currentLobby.value?.status.tag, isCreator: isCreator.value, cpu: isCpuMode.value }),
+  (s) => {
+    if (s.cpu && s.isCreator && s.status === 'Waiting' && s.count >= 2) {
+      startGame();
+    }
+  },
+  { deep: true }
+);
 
 const updateGameSettings = (settings: Partial<GameSettings>) => {
   if (gameSettings.value) {
@@ -301,11 +354,19 @@ const onSubmitNewName = () => {
                     >
                       Creator
                     </UBadge>
+                    <UBadge 
+                      v-if="botIdentityHex && player.identity.toHexString() === botIdentityHex"
+                      color="neutral"
+                      variant="subtle"
+                      size="sm"
+                    >
+                      CPU
+                    </UBadge>
                   </div>
                 </div>
               </div>
 
-              <!-- Start Game Button -->
+              <!-- Start Game Button / Auto-start in CPU mode -->
               <div v-if="isCreator && currentLobby.status.tag === 'Waiting' && lobbyPlayers.length >= 2" class="flex justify-center pt-4">
                 <UButton
                   @click="startGame"
@@ -314,6 +375,16 @@ const onSubmitNewName = () => {
                   icon="i-lucide-play"
                 >
                   Start Game
+                </UButton>
+              </div>
+              <div v-else-if="isCreator && currentLobby.status.tag === 'Waiting' && lobbyPlayers.length >= 2 && isCpuMode" class="flex justify-center pt-4">
+                <UButton
+                  color="primary"
+                  size="lg"
+                  icon="i-lucide-play"
+                  @click="startGame"
+                >
+                  Waiting for auto-start...
                 </UButton>
               </div>
             </div>

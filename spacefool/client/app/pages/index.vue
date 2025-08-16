@@ -1,5 +1,41 @@
 <script setup lang="ts">
-// Welcome page for Durak card game
+import { shallowRef, onMounted } from 'vue';
+import { DbConnection, type ReducerEventContext } from '../../module_bindings';
+import type { Identity } from '@clockworklabs/spacetimedb-sdk';
+import { useRouter } from 'vue-router';
+
+const router = useRouter();
+const connected = shallowRef(false);
+const conn = shallowRef<DbConnection | null>(null);
+
+const quickPlay = async () => {
+  // CPU mode: create a 1v1 lobby and flag CPU orchestration
+  try {
+    localStorage.setItem('cpu_mode', '1');
+    await conn.value?.reducers.createLobby('Solo vs Computer', 2);
+  } finally {
+    router.push('/lobbies');
+  }
+};
+
+onMounted(() => {
+  const onConnect = (connInstance: DbConnection, _identity: Identity, token: string) => {
+    connected.value = true;
+    localStorage.setItem('auth_token', token);
+  };
+  const onDisconnect = () => { connected.value = false; };
+  const onConnectError = (_ctx: any, err: Error) => { console.error('Spacetime connect error', err); };
+  conn.value = (
+    DbConnection.builder()
+      .withUri('ws://localhost:3000')
+      .withModuleName('spacefool')
+      .withToken(localStorage.getItem('auth_token') || '')
+      .onConnect(onConnect)
+      .onDisconnect(onDisconnect)
+      .onConnectError(onConnectError)
+      .build()
+  );
+});
 </script>
 
 <template>
@@ -18,9 +54,19 @@
       >
         Join a Lobby
       </UButton>
+      <UButton 
+        :disabled="!connected"
+        color="success" 
+        size="lg"
+        icon="i-lucide-rocket"
+        @click="quickPlay"
+      >
+        Quick Play
+      </UButton>
       
       <div class="text-sm text-gray-500">
         <p>Create or join a lobby to start playing with friends!</p>
+        <p class="mt-1">Connected: {{ connected ? 'Yes' : 'No' }}</p>
       </div>
     </div>
   </div>
