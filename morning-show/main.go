@@ -21,7 +21,7 @@ import (
 
 // Config holds configuration for the morning show
 type Config struct {
-	MinifluURL      string
+	MinifluxURL     string
 	GeminiAPIKey    string
 	ProjectID       string
 	OutputFormat    string // "wav" or "mp3"
@@ -32,20 +32,26 @@ type Config struct {
 	TTSPrompt       string
 }
 
-// MinifluMessage represents a message from miniflu
-type MinifluMessage struct {
-	ID        string    `json:"id"`
-	Content   string    `json:"content"`
-	Timestamp time.Time `json:"timestamp"`
-	Read      bool      `json:"read"`
-	Source    string    `json:"source"`
+// MinifluxEntry represents an entry from Miniflux
+type MinifluxEntry struct {
+	ID          int64     `json:"id"`
+	Title       string    `json:"title"`
+	URL         string    `json:"url"`
+	Content     string    `json:"content"`
+	Summary     string    `json:"summary"`
+	PublishedAt time.Time `json:"published_at"`
+	CreatedAt   time.Time `json:"created_at"`
+	Status      string    `json:"status"`
+	Feed        struct {
+		ID       int64  `json:"id"`
+		Title    string `json:"title"`
+		SiteURL  string `json:"site_url"`
+		FeedURL  string `json:"feed_url"`
+	} `json:"feed"`
 }
 
-// MinifluResponse represents the response from miniflu API
-type MinifluResponse struct {
-	Messages []MinifluMessage `json:"messages"`
-	Total    int              `json:"total"`
-}
+// MinifluxResponse represents the response from Miniflux API
+type MinifluxResponse []MinifluxEntry
 
 // GeminiTTSRequest represents the request to Gemini TTS API
 type GeminiTTSRequest struct {
@@ -71,7 +77,7 @@ type GeminiTTSResponse struct {
 func main() {
 	// Load configuration from environment variables
 	config := &Config{
-		MinifluURL:    getEnv("MINIFLU_URL", "http://localhost:8080/api/messages/unread"),
+		MinifluxURL:   getEnv("MINIFLUX_URL", "http://localhost:8080/v1/entries?status=unread&direction=desc"),
 		GeminiAPIKey:  getEnv("GEMINI_API_KEY", ""),
 		ProjectID:     getEnv("PROJECT_ID", ""),
 		OutputFormat:  getEnv("OUTPUT_FORMAT", "wav"),
@@ -92,26 +98,26 @@ func main() {
 
 	log.Println("Starting morning show generation...")
 
-	// Step 1: Read unread messages from miniflu
-	messages, err := readMinifluMessages(config.MinifluURL)
+	// Step 1: Read unread entries from Miniflux
+	entries, err := readMinifluxEntries(config.MinifluxURL)
 	if err != nil {
-		log.Fatalf("Failed to read miniflu messages: %v", err)
+		log.Fatalf("Failed to read Miniflux entries: %v", err)
 	}
 
-	if len(messages) == 0 {
-		log.Println("No unread messages found. Exiting.")
+	if len(entries) == 0 {
+		log.Println("No unread entries found. Exiting.")
 		return
 	}
 
-	log.Printf("Found %d unread messages", len(messages))
+	log.Printf("Found %d unread entries", len(entries))
 
-	// Step 2: Summarize messages using Gemini
-	summary, err := summarizeMessages(messages, config.GeminiAPIKey)
+	// Step 2: Summarize entries using Gemini
+	summary, err := summarizeEntries(entries, config.GeminiAPIKey)
 	if err != nil {
-		log.Fatalf("Failed to summarize messages: %v", err)
+		log.Fatalf("Failed to summarize entries: %v", err)
 	}
 
-	log.Println("Messages summarized successfully")
+	log.Println("Entries summarized successfully")
 
 	// Step 3: Generate audio using Gemini TTS
 	err = generateAudio(summary, config)
@@ -122,18 +128,18 @@ func main() {
 	log.Printf("Morning show audio generated successfully: %s", config.OutputFile)
 }
 
-// readMinifluMessages fetches unread messages from miniflu
-func readMinifluMessages(url string) ([]MinifluMessage, error) {
+// readMinifluxEntries fetches unread entries from Miniflux
+func readMinifluxEntries(url string) ([]MinifluxEntry, error) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	
 	resp, err := client.Get(url)
 	if err != nil {
-		return nil, fmt.Errorf("failed to make request to miniflu: %w", err)
+		return nil, fmt.Errorf("failed to make request to Miniflux: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("miniflu API returned status %d", resp.StatusCode)
+		return nil, fmt.Errorf("Miniflux API returned status %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -141,16 +147,16 @@ func readMinifluMessages(url string) ([]MinifluMessage, error) {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	var response MinifluResponse
+	var response MinifluxResponse
 	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
-	return response.Messages, nil
+	return response, nil
 }
 
-// summarizeMessages uses Gemini to summarize the messages
-func summarizeMessages(messages []MinifluMessage, apiKey string) (string, error) {
+// summarizeEntries uses Gemini to summarize the entries
+func summarizeEntries(entries []MinifluxEntry, apiKey string) (string, error) {
 	ctx := context.Background()
 	client, err := genai.NewClient(ctx, option.WithAPIKey(apiKey))
 	if err != nil {
@@ -160,13 +166,22 @@ func summarizeMessages(messages []MinifluMessage, apiKey string) (string, error)
 
 	model := client.GenerativeModel("gemini-1.5-flash")
 
-	// Prepare the prompt with all messages
+	// Prepare the prompt with all entries
 	var prompt strings.Builder
-	prompt.WriteString("You are creating a summary for a morning show. Please summarize the following unread messages in a conversational, engaging way that would be suitable for a morning show format. Keep it concise but informative, and make it sound natural when read aloud.\n\n")
-	prompt.WriteString("Messages:\n")
+	prompt.WriteString("You are creating a summary for a morning show. Please summarize the following unread RSS feed entries in a conversational, engaging way that would be suitable for a morning show format. Keep it concise but informative, and make it sound natural when read aloud.\n\n")
+	prompt.WriteString("Feed Entries:\n")
 
-	for i, msg := range messages {
-		prompt.WriteString(fmt.Sprintf("%d. [%s] %s\n", i+1, msg.Source, msg.Content))
+	for i, entry := range entries {
+		// Use summary if available, otherwise use content (truncated)
+		content := entry.Summary
+		if content == "" {
+			content = entry.Content
+			if len(content) > 200 {
+				content = content[:200] + "..."
+			}
+		}
+		
+		prompt.WriteString(fmt.Sprintf("%d. [%s] %s - %s\n", i+1, entry.Feed.Title, entry.Title, content))
 	}
 
 	prompt.WriteString("\nPlease provide a summary that flows well as a morning show segment.")

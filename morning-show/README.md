@@ -1,10 +1,10 @@
 # Morning Show
 
-A Go script that creates automated morning show content by reading unread messages from miniflu, summarizing them using Gemini AI, and generating audio using text-to-speech.
+A Go script that creates automated morning show content by reading unread entries from Miniflux, summarizing them using Gemini AI, and generating audio using text-to-speech.
 
 ## Features
 
-- **Miniflu Integration**: Reads unread messages from a miniflu instance
+- **Miniflux Integration**: Reads unread RSS feed entries from a Miniflux instance
 - **AI Summarization**: Uses Google's Gemini AI to create engaging morning show summaries
 - **Real Text-to-Speech**: Generates actual audio using Gemini TTS or Google Cloud TTS
 - **Multiple TTS Options**: Support for both Gemini TTS (with Kore voice) and Google Cloud TTS
@@ -13,7 +13,7 @@ A Go script that creates automated morning show content by reading unread messag
 ## Prerequisites
 
 - Go 1.19 or later
-- A miniflu instance running and accessible
+- A Miniflux instance running and accessible
 - Google Gemini API key
 - Google Cloud Project (for Gemini TTS)
 - gcloud CLI installed and authenticated (for Gemini TTS)
@@ -35,8 +35,8 @@ A Go script that creates automated morning show content by reading unread messag
 
 2. Edit `.env` with your configuration:
    ```bash
-   # Miniflu API URL
-   MINIFLU_URL=http://your-miniflu-instance:8080/api/messages/unread
+   # Miniflux API URL
+   MINIFLUX_URL=http://your-miniflux-instance:8080/v1/entries?status=unread&direction=desc
    
    # Gemini API Key (required)
    GEMINI_API_KEY=your_actual_api_key_here
@@ -63,7 +63,7 @@ A Go script that creates automated morning show content by reading unread messag
 # Set environment variables
 export GEMINI_API_KEY="your_api_key_here"
 export PROJECT_ID="your_project_id_here"
-export MINIFLU_URL="http://localhost:8080/api/messages/unread"
+export MINIFLUX_URL="http://localhost:8080/v1/entries?status=unread&direction=desc"
 
 # For Gemini TTS, make sure you're authenticated with gcloud
 gcloud auth application-default login
@@ -92,8 +92,8 @@ go build -o morning-show main.go
 
 ## How It Works
 
-1. **Message Collection**: The script fetches unread messages from the configured miniflu instance
-2. **AI Summarization**: Messages are sent to Gemini AI with a prompt to create an engaging morning show summary
+1. **Entry Collection**: The script fetches unread RSS feed entries from the configured Miniflux instance
+2. **AI Summarization**: Entries are sent to Gemini AI with a prompt to create an engaging morning show summary
 3. **Audio Generation**: The summary is processed using either:
    - **Gemini TTS**: Uses the latest Gemini TTS models with advanced voice synthesis
    - **Google Cloud TTS**: Uses the standard Google Cloud Text-to-Speech API
@@ -101,23 +101,29 @@ go build -o morning-show main.go
 
 ## API Requirements
 
-### Miniflu API
+### Miniflux API
 
-The script expects miniflu to provide an endpoint that returns unread messages in the following format:
+The script expects Miniflux to provide an endpoint that returns unread entries in the following format:
 
 ```json
-{
-  "messages": [
-    {
-      "id": "message_id",
-      "content": "Message content",
-      "timestamp": "2024-01-01T00:00:00Z",
-      "read": false,
-      "source": "source_name"
+[
+  {
+    "id": 123,
+    "title": "Article Title",
+    "url": "https://example.com/article",
+    "content": "Article content...",
+    "summary": "Article summary...",
+    "published_at": "2024-01-01T00:00:00Z",
+    "created_at": "2024-01-01T00:00:00Z",
+    "status": "unread",
+    "feed": {
+      "id": 1,
+      "title": "Feed Title",
+      "site_url": "https://example.com",
+      "feed_url": "https://example.com/feed.xml"
     }
-  ],
-  "total": 1
-}
+  }
+]
 ```
 
 ### Gemini API
@@ -137,7 +143,7 @@ The script expects miniflu to provide an endpoint that returns unread messages i
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `MINIFLU_URL` | URL to miniflu unread messages endpoint | `http://localhost:8080/api/messages/unread` | No |
+| `MINIFLUX_URL` | URL to Miniflux unread entries endpoint | `http://localhost:8080/v1/entries?status=unread&direction=desc` | No |
 | `GEMINI_API_KEY` | Google Gemini API key | - | Yes |
 | `PROJECT_ID` | Google Cloud Project ID (for Gemini TTS) | - | Yes (for Gemini TTS) |
 | `TTS_SERVICE` | TTS service to use (`gemini` or `google`) | `gemini` | No |
@@ -170,10 +176,10 @@ The script expects miniflu to provide an endpoint that returns unread messages i
    - Make sure you've set the `GEMINI_API_KEY` environment variable
    - Verify your API key is valid and has the necessary permissions
 
-2. **"Failed to make request to miniflu"**
-   - Check that your miniflu instance is running and accessible
-   - Verify the `MINIFLU_URL` is correct
-   - Ensure the miniflu API endpoint returns the expected JSON format
+2. **"Failed to make request to Miniflux"**
+   - Check that your Miniflux instance is running and accessible
+   - Verify the `MINIFLUX_URL` is correct
+   - Ensure the Miniflux API endpoint returns the expected JSON format
 
 3. **"Failed to generate content"**
    - Check your Gemini API key and quota

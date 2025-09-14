@@ -50,7 +50,7 @@ help:
 	@echo "Environment variables:"
 	@echo "  GEMINI_API_KEY - Required: Your Google Gemini API key"
 	@echo "  PROJECT_ID     - Required: Your Google Cloud Project ID (for Gemini TTS)"
-	@echo "  MINIFLU_URL    - Optional: Miniflu API endpoint (default: http://localhost:8080/api/messages/unread)"
+	@echo "  MINIFLUX_URL   - Optional: Miniflux API endpoint (default: http://localhost:8080/v1/entries?status=unread&direction=desc)"
 	@echo "  TTS_SERVICE    - Optional: TTS service to use (gemini/google, default: gemini)"
 	@echo "  VOICE_NAME     - Optional: Voice name (default: Kore)"
 	@echo "  OUTPUT_FILE    - Optional: Output filename (default: morning-show.wav)"
