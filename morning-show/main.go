@@ -1,26 +1,35 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/google/generative-ai-go/genai"
 	"google.golang.org/api/option"
+	"google.golang.org/api/texttospeech/v1"
 )
 
 // Config holds configuration for the morning show
 type Config struct {
-	MinifluURL    string
-	GeminiAPIKey  string
-	OutputFormat  string // "wav" or "mp3"
-	OutputFile    string
+	MinifluURL      string
+	GeminiAPIKey    string
+	ProjectID       string
+	OutputFormat    string // "wav" or "mp3"
+	OutputFile      string
+	TTSService      string // "gemini" or "google"
+	VoiceName       string
+	LanguageCode    string
+	TTSPrompt       string
 }
 
 // MinifluMessage represents a message from miniflu
@@ -40,27 +49,45 @@ type MinifluResponse struct {
 
 // GeminiTTSRequest represents the request to Gemini TTS API
 type GeminiTTSRequest struct {
-	Text  string `json:"text"`
-	Voice string `json:"voice"`
+	Input struct {
+		Prompt string `json:"prompt"`
+		Text   string `json:"text"`
+	} `json:"input"`
+	Voice struct {
+		LanguageCode string `json:"languageCode"`
+		Name         string `json:"name"`
+		ModelName    string `json:"model_name"`
+	} `json:"voice"`
+	AudioConfig struct {
+		AudioEncoding string `json:"audioEncoding"`
+	} `json:"audioConfig"`
 }
 
 // GeminiTTSResponse represents the response from Gemini TTS API
 type GeminiTTSResponse struct {
-	AudioData string `json:"audioData"`
-	Format    string `json:"format"`
+	AudioContent string `json:"audioContent"`
 }
 
 func main() {
 	// Load configuration from environment variables
 	config := &Config{
-		MinifluURL:   getEnv("MINIFLU_URL", "http://localhost:8080/api/messages/unread"),
-		GeminiAPIKey: getEnv("GEMINI_API_KEY", ""),
-		OutputFormat: getEnv("OUTPUT_FORMAT", "wav"),
-		OutputFile:   getEnv("OUTPUT_FILE", "morning-show.wav"),
+		MinifluURL:    getEnv("MINIFLU_URL", "http://localhost:8080/api/messages/unread"),
+		GeminiAPIKey:  getEnv("GEMINI_API_KEY", ""),
+		ProjectID:     getEnv("PROJECT_ID", ""),
+		OutputFormat:  getEnv("OUTPUT_FORMAT", "wav"),
+		OutputFile:    getEnv("OUTPUT_FILE", "morning-show.wav"),
+		TTSService:    getEnv("TTS_SERVICE", "gemini"),
+		VoiceName:     getEnv("VOICE_NAME", "Kore"),
+		LanguageCode:  getEnv("LANGUAGE_CODE", "en-us"),
+		TTSPrompt:     getEnv("TTS_PROMPT", "Say the following in a curious and engaging way for a morning show"),
 	}
 
 	if config.GeminiAPIKey == "" {
 		log.Fatal("GEMINI_API_KEY environment variable is required")
+	}
+
+	if config.TTSService == "gemini" && config.ProjectID == "" {
+		log.Fatal("PROJECT_ID environment variable is required for Gemini TTS")
 	}
 
 	log.Println("Starting morning show generation...")
@@ -163,32 +190,176 @@ func summarizeMessages(messages []MinifluMessage, apiKey string) (string, error)
 	return summary, nil
 }
 
-// generateAudio uses Gemini TTS to generate audio from the summary
+// generateAudio uses TTS to generate audio from the summary
 func generateAudio(text string, config *Config) error {
-	// Note: This is a placeholder implementation since Gemini TTS API
-	// might not be directly available. In a real implementation, you would:
-	// 1. Use Google Cloud Text-to-Speech API
-	// 2. Or use a different TTS service
-	// 3. Or implement a custom TTS solution
-
-	// For now, we'll create a simple text file as output
-	// In a real implementation, this would generate actual audio
 	log.Printf("Generating audio for text: %s", text)
 	
-	// Create a simple text file as placeholder
+	switch config.TTSService {
+	case "gemini":
+		return generateGeminiTTS(text, config)
+	case "google":
+		return generateGoogleTTS(text, config)
+	default:
+		return fmt.Errorf("unsupported TTS service: %s", config.TTSService)
+	}
+}
+
+// generateGeminiTTS uses Gemini TTS API to generate audio
+func generateGeminiTTS(text string, config *Config) error {
+	// Get access token using gcloud
+	accessToken, err := getGCloudAccessToken()
+	if err != nil {
+		return fmt.Errorf("failed to get access token: %w", err)
+	}
+
+	// Prepare the request
+	request := GeminiTTSRequest{
+		Input: struct {
+			Prompt string `json:"prompt"`
+			Text   string `json:"text"`
+		}{
+			Prompt: config.TTSPrompt,
+			Text:   text,
+		},
+		Voice: struct {
+			LanguageCode string `json:"languageCode"`
+			Name         string `json:"name"`
+			ModelName    string `json:"model_name"`
+		}{
+			LanguageCode: config.LanguageCode,
+			Name:         config.VoiceName,
+			ModelName:    "gemini-2.5-flash-preview-tts",
+		},
+		AudioConfig: struct {
+			AudioEncoding string `json:"audioEncoding"`
+		}{
+			AudioEncoding: "LINEAR16",
+		},
+	}
+
+	// Marshal request to JSON
+	requestBody, err := json.Marshal(request)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	// Make HTTP request to Gemini TTS API
+	client := &http.Client{Timeout: 60 * time.Second}
+	req, err := http.NewRequest("POST", "https://texttospeech.googleapis.com/v1/text:synthesize", bytes.NewBuffer(requestBody))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("x-goog-user-project", config.ProjectID)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to make request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("TTS API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse response
+	var ttsResponse GeminiTTSResponse
+	if err := json.NewDecoder(resp.Body).Decode(&ttsResponse); err != nil {
+		return fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	// Decode base64 audio content
+	audioData, err := base64.StdEncoding.DecodeString(ttsResponse.AudioContent)
+	if err != nil {
+		return fmt.Errorf("failed to decode audio content: %w", err)
+	}
+
+	// Write audio file
 	file, err := os.Create(config.OutputFile)
 	if err != nil {
 		return fmt.Errorf("failed to create output file: %w", err)
 	}
 	defer file.Close()
 
-	_, err = file.WriteString(fmt.Sprintf("Morning Show Summary\n==================\n\n%s", text))
+	_, err = file.Write(audioData)
 	if err != nil {
-		return fmt.Errorf("failed to write to file: %w", err)
+		return fmt.Errorf("failed to write audio data: %w", err)
 	}
 
-	log.Printf("Audio content written to %s (placeholder implementation)", config.OutputFile)
+	log.Printf("Audio generated successfully: %s", config.OutputFile)
 	return nil
+}
+
+// generateGoogleTTS uses Google Cloud Text-to-Speech API
+func generateGoogleTTS(text string, config *Config) error {
+	ctx := context.Background()
+	
+	// Create TTS client
+	client, err := texttospeech.NewService(ctx, option.WithAPIKey(config.GeminiAPIKey))
+	if err != nil {
+		return fmt.Errorf("failed to create TTS client: %w", err)
+	}
+
+	// Prepare the synthesis request
+	req := &texttospeech.SynthesizeSpeechRequest{
+		Input: &texttospeech.SynthesisInput{
+			Text: text,
+		},
+		Voice: &texttospeech.VoiceSelectionParams{
+			LanguageCode: config.LanguageCode,
+			Name:         config.VoiceName,
+		},
+		AudioConfig: &texttospeech.AudioConfig{
+			AudioEncoding: "LINEAR16",
+		},
+	}
+
+	// Perform the synthesis
+	resp, err := client.Text.Synthesize(req).Do()
+	if err != nil {
+		return fmt.Errorf("failed to synthesize speech: %w", err)
+	}
+
+	// Write audio file
+	file, err := os.Create(config.OutputFile)
+	if err != nil {
+		return fmt.Errorf("failed to create output file: %w", err)
+	}
+	defer file.Close()
+
+	// Decode base64 audio content for Google TTS
+	audioData, err := base64.StdEncoding.DecodeString(resp.AudioContent)
+	if err != nil {
+		return fmt.Errorf("failed to decode audio content: %w", err)
+	}
+
+	_, err = file.Write(audioData)
+	if err != nil {
+		return fmt.Errorf("failed to write audio data: %w", err)
+	}
+
+	log.Printf("Audio generated successfully: %s", config.OutputFile)
+	return nil
+}
+
+// getGCloudAccessToken gets an access token using gcloud CLI
+func getGCloudAccessToken() (string, error) {
+	// This is a simplified implementation
+	// In a production environment, you might want to use the Google Cloud Go client libraries
+	// or implement proper OAuth2 flow
+	
+	// For now, we'll assume the user has run `gcloud auth application-default login`
+	// and we can use the default credentials
+	cmd := exec.Command("gcloud", "auth", "application-default", "print-access-token")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get access token from gcloud: %w", err)
+	}
+	
+	return strings.TrimSpace(string(output)), nil
 }
 
 // getEnv gets an environment variable with a default value

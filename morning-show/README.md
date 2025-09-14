@@ -6,7 +6,8 @@ A Go script that creates automated morning show content by reading unread messag
 
 - **Miniflu Integration**: Reads unread messages from a miniflu instance
 - **AI Summarization**: Uses Google's Gemini AI to create engaging morning show summaries
-- **Text-to-Speech**: Generates audio output (currently placeholder implementation)
+- **Real Text-to-Speech**: Generates actual audio using Gemini TTS or Google Cloud TTS
+- **Multiple TTS Options**: Support for both Gemini TTS (with Kore voice) and Google Cloud TTS
 - **Configurable**: Environment-based configuration for easy deployment
 
 ## Prerequisites
@@ -14,6 +15,8 @@ A Go script that creates automated morning show content by reading unread messag
 - Go 1.19 or later
 - A miniflu instance running and accessible
 - Google Gemini API key
+- Google Cloud Project (for Gemini TTS)
+- gcloud CLI installed and authenticated (for Gemini TTS)
 
 ## Installation
 
@@ -38,6 +41,15 @@ A Go script that creates automated morning show content by reading unread messag
    # Gemini API Key (required)
    GEMINI_API_KEY=your_actual_api_key_here
    
+   # Google Cloud Project ID (required for Gemini TTS)
+   PROJECT_ID=your_project_id_here
+   
+   # TTS Configuration
+   TTS_SERVICE=gemini
+   VOICE_NAME=Kore
+   LANGUAGE_CODE=en-us
+   TTS_PROMPT=Say the following in a curious and engaging way for a morning show
+   
    # Output settings
    OUTPUT_FORMAT=wav
    OUTPUT_FILE=morning-show.wav
@@ -50,7 +62,11 @@ A Go script that creates automated morning show content by reading unread messag
 ```bash
 # Set environment variables
 export GEMINI_API_KEY="your_api_key_here"
+export PROJECT_ID="your_project_id_here"
 export MINIFLU_URL="http://localhost:8080/api/messages/unread"
+
+# For Gemini TTS, make sure you're authenticated with gcloud
+gcloud auth application-default login
 
 # Run the morning show generator
 go run main.go
@@ -78,8 +94,10 @@ go build -o morning-show main.go
 
 1. **Message Collection**: The script fetches unread messages from the configured miniflu instance
 2. **AI Summarization**: Messages are sent to Gemini AI with a prompt to create an engaging morning show summary
-3. **Audio Generation**: The summary is processed for text-to-speech (currently outputs a text file as placeholder)
-4. **Output**: The final audio file is saved to the configured location
+3. **Audio Generation**: The summary is processed using either:
+   - **Gemini TTS**: Uses the latest Gemini TTS models with advanced voice synthesis
+   - **Google Cloud TTS**: Uses the standard Google Cloud Text-to-Speech API
+4. **Output**: The final audio file (WAV format) is saved to the configured location
 
 ## API Requirements
 
@@ -108,31 +126,41 @@ The script expects miniflu to provide an endpoint that returns unread messages i
 - Uses the `gemini-1.5-flash` model for summarization
 - Make sure your API key has access to the Generative AI API
 
+### Google Cloud TTS
+
+- **For Gemini TTS**: Requires a Google Cloud Project ID and gcloud CLI authentication
+- **For Google Cloud TTS**: Uses the standard Text-to-Speech API
+- Available models for Gemini TTS: `gemini-2.5-flash-preview-tts`, `gemini-2.5-pro-preview-tts`
+- Available voices: Kore (and others depending on the model)
+
 ## Environment Variables
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
 | `MINIFLU_URL` | URL to miniflu unread messages endpoint | `http://localhost:8080/api/messages/unread` | No |
 | `GEMINI_API_KEY` | Google Gemini API key | - | Yes |
+| `PROJECT_ID` | Google Cloud Project ID (for Gemini TTS) | - | Yes (for Gemini TTS) |
+| `TTS_SERVICE` | TTS service to use (`gemini` or `google`) | `gemini` | No |
+| `VOICE_NAME` | Voice name for TTS | `Kore` | No |
+| `LANGUAGE_CODE` | Language code for TTS | `en-us` | No |
+| `TTS_PROMPT` | Prompt for TTS voice style | `Say the following in a curious and engaging way for a morning show` | No |
 | `OUTPUT_FORMAT` | Output audio format | `wav` | No |
 | `OUTPUT_FILE` | Output filename | `morning-show.wav` | No |
 
 ## Current Limitations
 
-- **TTS Implementation**: The current implementation outputs a text file instead of actual audio. To implement real TTS, you would need to:
-  - Use Google Cloud Text-to-Speech API
-  - Integrate with a different TTS service
-  - Implement a custom TTS solution
-- **Aoede Voice**: The specific "Aoede" voice mentioned in requirements is not yet implemented
+- **Aoede Voice**: The specific "Aoede" voice mentioned in requirements is not yet implemented (currently using Kore voice)
+- **Audio Format**: Currently outputs WAV format only (MP3 support can be added)
+- **gcloud Dependency**: Gemini TTS requires gcloud CLI to be installed and authenticated
 
 ## Future Enhancements
 
-- Real TTS integration with Google Cloud Text-to-Speech
-- Support for multiple voice options including Aoede
-- Audio format conversion (WAV/MP3)
+- Support for Aoede voice and other advanced voice options
+- Audio format conversion (MP3 support)
 - Scheduling and automation features
 - Enhanced error handling and retry logic
 - Configuration file support (JSON/YAML)
+- Fallback TTS options if primary service fails
 
 ## Troubleshooting
 
@@ -150,6 +178,15 @@ The script expects miniflu to provide an endpoint that returns unread messages i
 3. **"Failed to generate content"**
    - Check your Gemini API key and quota
    - Verify you have access to the Generative AI API
+
+4. **"PROJECT_ID environment variable is required for Gemini TTS"**
+   - Set the `PROJECT_ID` environment variable with your Google Cloud project ID
+   - Make sure you have access to the project
+
+5. **"Failed to get access token from gcloud"**
+   - Install gcloud CLI: https://cloud.google.com/sdk/docs/install
+   - Run `gcloud auth application-default login`
+   - Make sure you're authenticated with the correct project
 
 ## License
 
