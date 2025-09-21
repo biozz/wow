@@ -1,6 +1,0 @@
-test/pouch__all_dbs__/
-node_modules
-coverage.txt
-**/package-lock.json
-mockdb/other
-**/*~
