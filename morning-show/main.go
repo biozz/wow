@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -119,6 +120,14 @@ func main() {
 	}
 
 	log.Printf("Morning show audio generated successfully: %s", fileName)
+
+	// Convert WAV to MP3 using ffmpeg if available
+	mp3Name := strings.TrimSuffix(fileName, ".wav") + ".mp3"
+	if err := convertWAVToMP3(fileName, mp3Name); err != nil {
+		log.Printf("WAV->MP3 conversion skipped/failed: %v", err)
+	} else {
+		log.Printf("MP3 created: %s", mp3Name)
+	}
 }
 
 // writeWAVFile writes PCM audio data to a WAV file with the specified format
@@ -161,4 +170,29 @@ func writeWAVFile(filename string, audioData []byte, sampleRate, channels, bitsP
 	file.Write(audioData)
 
 	return nil
+}
+
+// convertWAVToMP3 converts a WAV file to MP3 using ffmpeg if present on PATH.
+// Keeps the source WAV. Returns error if ffmpeg is missing or conversion fails.
+func convertWAVToMP3(wavPath, mp3Path string) error {
+	ffmpegPath, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		return fmt.Errorf("ffmpeg not found in PATH")
+	}
+
+	// Example command:
+	// ffmpeg -y -hide_banner -loglevel error -i input.wav -codec:a libmp3lame -b:a 128k output.mp3
+	cmd := exec.Command(
+		ffmpegPath,
+		"-y",
+		"-hide_banner",
+		"-loglevel", "error",
+		"-i", wavPath,
+		"-codec:a", "libmp3lame",
+		"-b:a", "128k",
+		mp3Path,
+	)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
