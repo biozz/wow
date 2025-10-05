@@ -59,8 +59,8 @@ export async function loadCorpusFromUrl(url: string): Promise<CorpusFile> {
 
 // Get list of available corpus files
 export async function getAvailableCorpusFiles(): Promise<string[]> {
-  // For now, return hardcoded list. In a real app, you might fetch this from an API
-  return ['poetry.txt', 'classic.txt', 'modern.txt', 'karenina.txt']
+  // Only include files that actually exist in the public folder
+  return ['karenina.txt']
 }
 
 // Load all available corpus files

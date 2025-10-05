@@ -2,17 +2,18 @@
   "name": "t9-poetry",
   "type": "module",
   "scripts": {
-    "dev": "vinxi dev",
-    "build": "vinxi build",
-    "start": "vinxi start"
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
   },
   "dependencies": {
-    "@solidjs/router": "^0.15.0",
-    "@solidjs/start": "^1.1.0",
+    "solid-js": "^1.9.5"
+  },
+  "devDependencies": {
     "@unocss/reset": "^0.65.1",
-    "solid-js": "^1.9.5",
     "unocss": "^0.65.1",
-    "vinxi": "^0.5.7"
+    "vite": "^6.0.3",
+    "vite-plugin-solid": "^2.10.2"
   },
   "engines": {
     "node": ">=22"
