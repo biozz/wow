@@ -1,0 +1,11 @@
+# Example config for serve. Copy to serve.yaml or pass via --config / -c or SERVE_CONFIG.
+# Precedence: CLI flags > env vars > config file > defaults.
+serve:
+  etcd_endpoint: "localhost:2379"
+  etcd_user: ""
+  etcd_password: ""
+  target_ip: "127.0.0.1"
+  domain_template: "%s.example.com"
+  cert_resolver: "lecf"
+  key_prefix: "serve"
+  slug_length: 3

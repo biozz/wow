@@ -3,8 +3,8 @@ module github.com/biozz/wow/serve
 go 1.24.3
 
 require (
-	github.com/caarlos0/env/v11 v11.3.1
-	github.com/urfave/cli/v3 v3.3.8
+	github.com/urfave/cli-altsrc/v3 v3.1.0
+	github.com/urfave/cli/v3 v3.4.1
 	go.etcd.io/etcd/client/v3 v3.5.17
 )
 
@@ -26,4 +26,5 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20230822172742-b8732ec3820d // indirect
 	google.golang.org/grpc v1.59.0 // indirect
 	google.golang.org/protobuf v1.33.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

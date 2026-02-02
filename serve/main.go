@@ -3,37 +3,139 @@ package main
 import (
 	"context"
 	"fmt"
-	"maps"
 	"math/rand"
 	"net/url"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
-	"github.com/caarlos0/env/v11"
+	"github.com/urfave/cli-altsrc/v3"
+	"github.com/urfave/cli-altsrc/v3/yaml"
 	"github.com/urfave/cli/v3"
 	etcd "go.etcd.io/etcd/client/v3"
 )
 
 type config struct {
-	EtcdEndpoint   string `env:"SERVE_ETCD_ENDPOINT" envDefault:"localhost:2379"`
-	EtcdUser       string `env:"SERVE_ETCD_USER"`
-	EtcdPassword   string `env:"SERVE_ETCD_PASSWORD"`
-	TargetIP       string `env:"SERVE_ETCD_TARGET_IP" envDefault:"127.0.0.1"`
-	DomainTemplate string `env:"SERVE_DOMAIN_TEMPLATE"`
-	CertResolver   string `env:"SERVE_CERT_RESOLVER" envDefault:"lecf"`
+	EtcdEndpoint   string
+	EtcdUser       string
+	EtcdPassword   string
+	TargetIP       string
+	DomainTemplate string
+	CertResolver   string
+	KeyPrefix      string
+	SlugLength     int
+}
+
+func configFromCmd(cmd *cli.Command) config {
+	root := cmd.Root()
+	return config{
+		EtcdEndpoint:   root.String("etcd-endpoint"),
+		EtcdUser:       root.String("etcd-user"),
+		EtcdPassword:   root.String("etcd-password"),
+		TargetIP:       root.String("target-ip"),
+		DomainTemplate: root.String("domain-template"),
+		CertResolver:   root.String("cert-resolver"),
+		KeyPrefix:      root.String("key-prefix"),
+		SlugLength:     root.Int("slug-length"),
+	}
 }
 
 func main() {
-	cfg := config{}
-	if err := env.Parse(&cfg); err != nil {
-		fmt.Printf("Error parsing environment variables: %+v\n", err)
-		os.Exit(1)
+	configFilePath := os.Getenv("SERVE_CONFIG")
+	if configFilePath == "" {
+		configFilePath = "serve.yaml"
 	}
+	for i := 0; i < len(os.Args)-1; i++ {
+		if os.Args[i] == "--config" || os.Args[i] == "-c" {
+			configFilePath = os.Args[i+1]
+			break
+		}
+	}
+	configFileSourcer := altsrc.NewStringPtrSourcer(&configFilePath)
 
 	cmd := &cli.Command{
 		Name:  "serve",
 		Usage: "Expose local apps via Traefik over etcd",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:        "config",
+				Aliases:     []string{"c"},
+				Usage:       "path to config file (YAML)",
+				Value:       "serve.yaml",
+				Destination: &configFilePath,
+			},
+			&cli.StringFlag{
+				Name:  "etcd-endpoint",
+				Usage: "etcd server endpoint",
+				Value: "localhost:2379",
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SERVE_ETCD_ENDPOINT"),
+					yaml.YAML("serve.etcd_endpoint", configFileSourcer),
+				),
+			},
+			&cli.StringFlag{
+				Name:  "etcd-user",
+				Usage: "etcd username",
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SERVE_ETCD_USER"),
+					yaml.YAML("serve.etcd_user", configFileSourcer),
+				),
+			},
+			&cli.StringFlag{
+				Name:  "etcd-password",
+				Usage: "etcd password",
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SERVE_ETCD_PASSWORD"),
+					yaml.YAML("serve.etcd_password", configFileSourcer),
+				),
+			},
+			&cli.StringFlag{
+				Name:  "target-ip",
+				Usage: "Tailscale IP of local machine for Traefik to reach",
+				Value: "127.0.0.1",
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SERVE_ETCD_TARGET_IP"),
+					yaml.YAML("serve.target_ip", configFileSourcer),
+				),
+			},
+			&cli.StringFlag{
+				Name:  "domain-template",
+				Usage: "domain template with %s for app name (e.g. %s.example.com)",
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SERVE_DOMAIN_TEMPLATE"),
+					yaml.YAML("serve.domain_template", configFileSourcer),
+				),
+			},
+			&cli.StringFlag{
+				Name:  "cert-resolver",
+				Usage: "Traefik cert resolver name",
+				Value: "lecf",
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SERVE_CERT_RESOLVER"),
+					yaml.YAML("serve.cert_resolver", configFileSourcer),
+				),
+			},
+			&cli.StringFlag{
+				Name:  "key-prefix",
+				Usage: "prefix for router/service names in etcd (e.g. serve-myapp)",
+				Value: "serve",
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SERVE_KEY_PREFIX"),
+					yaml.YAML("serve.key_prefix", configFileSourcer),
+				),
+			},
+			&cli.IntFlag{
+				Name:  "slug-length",
+				Usage: "length of auto-generated slug (default 3)",
+				Value: 3,
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SERVE_SLUG_LENGTH"),
+					yaml.YAML("serve.slug_length", configFileSourcer),
+				),
+			},
+		},
 		Commands: []*cli.Command{
 			{
 				Name:      "run",
@@ -42,10 +144,16 @@ func main() {
 				ArgsUsage: "<port>",
 				Flags: []cli.Flag{
 					&cli.StringFlag{Name: "slug", Required: false, Usage: "Name of the app, e.g. myapp (auto-generated if not provided)"},
+					&cli.BoolFlag{Name: "detach", Aliases: []string{"d"}, Usage: "run in background (don't block; don't remove config on exit)"},
 				},
 				Action: func(ctx context.Context, cmd *cli.Command) error {
 					if cmd.NArg() != 1 {
 						return fmt.Errorf("exactly one argument (port) is required")
+					}
+
+					cfg := configFromCmd(cmd)
+					if cfg.DomainTemplate == "" {
+						return fmt.Errorf("domain-template is required (set in config file, env SERVE_DOMAIN_TEMPLATE, or --domain-template)")
 					}
 
 					port := cmd.Args().Get(0)
@@ -53,7 +161,11 @@ func main() {
 
 					// Generate random app name if not provided
 					if appName == "" {
-						appName = generateRandomSlug()
+						length := cfg.SlugLength
+						if length < 1 {
+							length = 3
+						}
+						appName = generateRandomSlug(length)
 						fmt.Printf("Generated app name: %s\n", appName)
 					}
 
@@ -71,12 +183,25 @@ func main() {
 					}
 
 					domain := fmt.Sprintf(cfg.DomainTemplate, appName)
+					resName := resourceName(cfg, appName)
 
 					if err := createTraefikConfig(cfg, appName, domain, port); err != nil {
 						return fmt.Errorf("failed to create traefik config: %w", err)
 					}
 
-					fmt.Printf("Successfully configured %s to point to %s:%s\n", appName, cfg.TargetIP, normalizedPort)
+					if cmd.Bool("detach") {
+						fmt.Printf("Service available at https://%s (forwarding to :%s)\n", domain, normalizedPort)
+						return nil
+					}
+
+					fmt.Printf("Serving at https://%s (forwarding to :%s). Press Ctrl+C to stop and remove from Traefik.\n", domain, normalizedPort)
+					sigCh := make(chan os.Signal, 1)
+					signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+					<-sigCh
+					if err := removeTraefikConfig(cfg, resName); err != nil {
+						return fmt.Errorf("failed to remove traefik config on exit: %w", err)
+					}
+					fmt.Println("Removed from Traefik.")
 					return nil
 				},
 			},
@@ -89,24 +214,54 @@ func main() {
 						return fmt.Errorf("exactly one argument (slug or port) is required")
 					}
 
+					cfg := configFromCmd(cmd)
 					identifier := cmd.Args().Get(0)
-					appName := identifier
+					var resourceNameForDelete string
 					if isDigits(identifier) {
-						// Assuming this is a port
-						appName = findAppNameByPort(cfg, identifier)
+						// Port: findAppNameByPort returns full etcd resource name (e.g. serve-myapp)
+						resourceNameForDelete = findAppNameByPort(cfg, identifier)
+					} else {
+						// Slug: build full resource name
+						resourceNameForDelete = resourceName(cfg, identifier)
 					}
 
-					if appName == "" {
+					if resourceNameForDelete == "" {
 						return fmt.Errorf("no app or port found for %s", identifier)
 					}
 
-					fmt.Printf("Removing traefik config for app: %s\n", appName)
+					slugDisplay := slugFromResourceName(cfg, resourceNameForDelete)
+					fmt.Printf("Removing traefik config for app: %s\n", slugDisplay)
 
-					if err := removeTraefikConfig(cfg, appName); err != nil {
+					if err := removeTraefikConfig(cfg, resourceNameForDelete); err != nil {
 						return fmt.Errorf("failed to remove traefik config: %w", err)
 					}
 
-					fmt.Printf("Successfully stopped service for app: %s\n", appName)
+					fmt.Printf("Successfully stopped service for app: %s\n", slugDisplay)
+					return nil
+				},
+			},
+			{
+				Name:      "clean",
+				Aliases:   []string{"reset"},
+				Usage:     "Remove all Traefik config for services managed by this utility (key prefix)",
+				ArgsUsage: " ",
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					cfg := configFromCmd(cmd)
+					activeServices, err := getActiveServices(cfg)
+					if err != nil {
+						return fmt.Errorf("could not get active services: %w", err)
+					}
+					if len(activeServices) == 0 {
+						fmt.Println("No active services to clean.")
+						return nil
+					}
+					for slug := range activeServices {
+						if err := removeTraefikConfig(cfg, resourceName(cfg, slug)); err != nil {
+							return fmt.Errorf("failed to remove %s: %w", slug, err)
+						}
+						fmt.Printf("Stopped %s\n", slug)
+					}
+					fmt.Printf("Cleaned %d service(s).\n", len(activeServices))
 					return nil
 				},
 			},
@@ -115,6 +270,7 @@ func main() {
 				Aliases: []string{"ls", "list"},
 				Usage:   "Show currently active services",
 				Action: func(ctx context.Context, cmd *cli.Command) error {
+					cfg := configFromCmd(cmd)
 					activeServices, err := getActiveServices(cfg)
 					if err != nil {
 						return fmt.Errorf("could not get active services: %w", err)
@@ -182,6 +338,10 @@ func getActiveServices(cfg config) (map[string]string, error) {
 			continue
 		}
 		routerName := parts[0]
+		// Only include routers that match our key prefix (if set)
+		if cfg.KeyPrefix != "" && !strings.HasPrefix(routerName, cfg.KeyPrefix+"-") {
+			continue
+		}
 		routerNames[routerName] = true
 	}
 
@@ -203,7 +363,8 @@ func getActiveServices(cfg config) (map[string]string, error) {
 
 		serviceURL := string(serviceResp.Kvs[0].Value)
 		u, _ := url.Parse(serviceURL)
-		services[routerName] = u.Port()
+		slug := slugFromResourceName(cfg, routerName)
+		services[slug] = u.Port()
 	}
 
 	return services, nil
@@ -237,31 +398,32 @@ func createTraefikConfig(cfg config, appName, domain string, port string) error 
 	normalizedPort := strings.TrimPrefix(port, ":")
 	portWithColon := ":" + normalizedPort
 
-	resourceName := appName
+	resName := resourceName(cfg, appName)
 	serviceURL := fmt.Sprintf("http://%s%s", cfg.TargetIP, portWithColon)
 	hostRule := fmt.Sprintf("Host(`%s`)", domain)
 
 	// Create router configuration
 	routerKeys := map[string]string{
-		fmt.Sprintf("traefik/http/routers/%s/entrypoints", resourceName):      "https",
-		fmt.Sprintf("traefik/http/routers/%s/tls", resourceName):              "true",
-		fmt.Sprintf("traefik/http/routers/%s/tls/certresolver", resourceName): cfg.CertResolver,
-		fmt.Sprintf("traefik/http/routers/%s/rule", resourceName):             hostRule,
-		fmt.Sprintf("traefik/http/routers/%s/service", resourceName):          resourceName,
+		fmt.Sprintf("traefik/http/routers/%s/entrypoints", resName):      "https",
+		fmt.Sprintf("traefik/http/routers/%s/tls", resName):              "true",
+		fmt.Sprintf("traefik/http/routers/%s/tls/certresolver", resName): cfg.CertResolver,
+		fmt.Sprintf("traefik/http/routers/%s/rule", resName):             hostRule,
+		fmt.Sprintf("traefik/http/routers/%s/service", resName):          resName,
 	}
 
 	// Create service configuration
 	serviceKeys := map[string]string{
-		fmt.Sprintf("traefik/http/services/%s/loadbalancer/servers/0/url", resourceName): serviceURL,
+		fmt.Sprintf("traefik/http/services/%s/loadbalancer/servers/0/url", resName): serviceURL,
 	}
 
-	// Combine all keys
-	allKeys := make(map[string]string)
-	maps.Copy(allKeys, routerKeys)
-	maps.Copy(allKeys, serviceKeys)
-
-	// Store all keys in etcd
-	for key, value := range allKeys {
+	// Store keys in etcd: service first, then routers (deterministic order)
+	for key, value := range serviceKeys {
+		_, err := client.Put(ctx, key, value)
+		if err != nil {
+			return fmt.Errorf("failed to put key %s: %w", key, err)
+		}
+	}
+	for key, value := range routerKeys {
 		_, err := client.Put(ctx, key, value)
 		if err != nil {
 			return fmt.Errorf("failed to put key %s: %w", key, err)
@@ -298,11 +460,12 @@ func removeTraefikConfig(cfg config, appName string) error {
 	return nil
 }
 
-// generateRandomSlug creates a random 8-character alphanumeric string
-func generateRandomSlug() string {
+// generateRandomSlug creates a random alphanumeric string of the given length
+func generateRandomSlug(length int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
-	const length = 8
-
+	if length < 1 {
+		length = 3
+	}
 	result := make([]byte, length)
 	for i := range result {
 		result[i] = charset[rand.Intn(len(charset))]
@@ -355,6 +518,24 @@ func isDigits(s string) bool {
 		}
 	}
 	return len(s) > 0
+}
+
+// resourceName returns the etcd/Traefik resource name (router/service name). If KeyPrefix is set, it is prefix-slug; otherwise slug only.
+func resourceName(cfg config, slug string) string {
+	if cfg.KeyPrefix == "" {
+		return slug
+	}
+	return cfg.KeyPrefix + "-" + slug
+}
+
+// slugFromResourceName returns the slug from a resource name (strips KeyPrefix if present).
+func slugFromResourceName(cfg config, name string) string {
+	if cfg.KeyPrefix == "" {
+		return name
+	}
+	prefix := cfg.KeyPrefix + "-"
+	name, _ = strings.CutPrefix(name, prefix)
+	return name
 }
 
 // truncateString truncates a string to maxLen characters, adding "..." if truncated

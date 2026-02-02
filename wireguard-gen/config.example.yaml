@@ -1,0 +1,25 @@
+# Example config. Copy to config.yaml and fill in your hosts/keys.
+# Do not commit config.yaml (it contains private keys).
+hosts:
+  server:
+    address: 10.0.0.1/32
+    private_key: <base64-private-key>
+    public_key: <base64-public-key>
+    peers:
+      - laptop
+      - desktop
+    endpoint: 0.0.0.0:51820
+  laptop:
+    address: 10.0.0.2/32
+    private_key: <base64-private-key>
+    public_key: <base64-public-key>
+    peers:
+      - server
+      - desktop
+  desktop:
+    address: 10.0.0.3/32
+    private_key: <base64-private-key>
+    public_key: <base64-public-key>
+    peers:
+      - server
+      - laptop

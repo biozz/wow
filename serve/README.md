@@ -17,22 +17,36 @@ The `serve` utility stores Traefik configuration directly in etcd that creates r
 
 ## Setup
 
-### 1. Configure Environment Variables
+### 1. Configure
 
-Set the following environment variables. You can add them to your `~/.bashrc` or `~/.zshrc` file.
+Configuration is read from (in order of precedence): CLI flags, environment variables, then a YAML config file. Default config file path is `serve.yaml` in the current directory. Override with `--config` / `-c` or the `SERVE_CONFIG` environment variable.
 
--   `SERVE_ETCD_ENDPOINT`: (Optional) The etcd server endpoint. Defaults to `localhost:2379`.
-    -   Example: `export SERVE_ETCD_ENDPOINT=etcd.example.com:2379`
--   `SERVE_ETCD_USER`: (Optional) Username for etcd authentication.
-    -   Example: `export SERVE_ETCD_USER=myuser`
--   `SERVE_ETCD_PASSWORD`: (Optional) Password for etcd authentication.
-    -   Example: `export SERVE_ETCD_PASSWORD=mypassword`
--   `SERVE_ETCD_TARGET_IP`: (Optional) The Tailscale IP address of your local development machine. Defaults to `127.0.0.1`.
-    -   Example: `export SERVE_ETCD_TARGET_IP=100.1.2.3`
--   `SERVE_DOMAIN_TEMPLATE`: (Required) Template string for generating domains. Use `%s` as placeholder for the app name.
-    -   Example: `export SERVE_DOMAIN_TEMPLATE=%s.example.com`
--   `SERVE_CERT_RESOLVER`: (Optional) The cert resolver to use for TLS certificates. Defaults to `lecf`.
-    -   Example: `export SERVE_CERT_RESOLVER=letsencrypt`
+**Config file** — Create `serve.yaml` (or copy from `serve.example.yaml`):
+
+```yaml
+serve:
+  etcd_endpoint: "localhost:2379"
+  etcd_user: ""
+  etcd_password: ""
+  target_ip: "127.0.0.1"
+  domain_template: "%s.example.com"
+  cert_resolver: "lecf"
+  key_prefix: "serve"
+```
+
+| YAML key (under `serve:`) | Description | Default |
+|---------------------------|-------------|---------|
+| `etcd_endpoint` | etcd server endpoint | `localhost:2379` |
+| `etcd_user` | etcd username | (empty) |
+| `etcd_password` | etcd password | (empty) |
+| `target_ip` | Tailscale IP of your local machine (for Traefik to reach) | `127.0.0.1` |
+| `domain_template` | Domain template; use `%s` for app name (required for `run`) | (empty) |
+| `cert_resolver` | Traefik cert resolver name | `lecf` |
+| `key_prefix` | Prefix for router/service names in etcd (e.g. `serve-myapp`) | `serve` |
+
+**Override via env** — Same keys as before: `SERVE_ETCD_ENDPOINT`, `SERVE_ETCD_USER`, `SERVE_ETCD_PASSWORD`, `SERVE_ETCD_TARGET_IP`, `SERVE_DOMAIN_TEMPLATE`, `SERVE_CERT_RESOLVER`, `SERVE_KEY_PREFIX`. Env overrides the config file.
+
+**Override via CLI** — Global flags: `--config` / `-c`, `--etcd-endpoint`, `--etcd-user`, `--etcd-password`, `--target-ip`, `--domain-template`, `--cert-resolver`, `--key-prefix`.
 
 ### 2. Configure Traefik
 
@@ -61,6 +75,22 @@ api:
   dashboard: true
 ```
 
+**Subdomains (wildcard TLS)** — If you need subdomains (e.g. `myapp.example.com` from `domain_template: "%s.example.com"`), configure a default TLS store with a wildcard cert in Traefik:
+
+```yaml
+tls:
+  stores:
+    default:
+      defaultGeneratedCert:
+        resolver: "acme"
+        domain:
+          main: "example.com"
+          sans:
+            - "*.example.com"
+            - "*.app.example.com"
+```
+
+Use the same `resolver` name as in your `certificatesResolvers` and in serve's `cert_resolver` config.
 
 ## Usage
 
@@ -79,9 +109,9 @@ serve run 8080 --slug my-cool-app
 
 - `<port>` (required): The port your local application is running on (e.g., `3000`, `8080`, `:8080`).
 - `--slug` (optional): A unique name for your application. If not provided, an 8-character random alphanumeric slug will be generated.
-- `--domain` (optional): A specific domain to use. If omitted, it uses `SERVE_DOMAIN_TEMPLATE` with the app name.
+- `--domain` (optional): A specific domain to use. If omitted, it uses `domain-template` (from config) with the app name.
 
-This command will create entries in etcd under the `traefik/http/` prefix for routers and services.
+This command will create entries in etcd under the `traefik/http/` prefix for routers and services (resource names use `{key_prefix}-{slug}` when the prefix is set).
 
 ### `stop`
 
@@ -96,6 +126,18 @@ serve stop 8080
 - `<slug|port>` (required): The name of the application or the port number to stop exposing.
 
 This will delete the corresponding configuration from etcd, and Traefik will automatically stop routing traffic for it.
+
+### `clean`
+
+Remove all Traefik config for services managed by this utility (only those whose router/service name matches the key prefix).
+
+```bash
+serve clean
+# or
+serve reset
+```
+
+Use this to wipe all serve-managed entries from etcd in one go.
 
 ### `status`
 
@@ -116,13 +158,13 @@ another-app          https://another-app.example.com          :3000
 
 ## etcd Key Structure
 
-Services are stored in etcd with the following key structure:
+Services are stored in etcd with the following key structure. The resource name is `{prefix}-{slug}` when `key_prefix` is set (e.g. `serve-myapp`), or just `{slug}` when the prefix is empty.
 
 ```
-traefik/http/routers/{slug}/entrypoints = "https"
-traefik/http/routers/{slug}/tls = "true"
-traefik/http/routers/{slug}/tls/certresolver = "{SERVE_CERT_RESOLVER}"
-traefik/http/routers/{slug}/rule = "Host(`{domain from SERVE_DOMAIN_TEMPLATE}`)"
-traefik/http/routers/{slug}/service = "{slug}"
-traefik/http/services/{slug}/loadbalancer/servers/0/url = "http://{SERVE_ETCD_TARGET_IP}:{port}"
+traefik/http/routers/{prefix}-{slug}/entrypoints = "https"
+traefik/http/routers/{prefix}-{slug}/tls = "true"
+traefik/http/routers/{prefix}-{slug}/tls/certresolver = "{cert_resolver}"
+traefik/http/routers/{prefix}-{slug}/rule = "Host(`{domain from domain_template}`)"
+traefik/http/routers/{prefix}-{slug}/service = "{prefix}-{slug}"
+traefik/http/services/{prefix}-{slug}/loadbalancer/servers/0/url = "http://{target_ip}:{port}"
 ``` 
