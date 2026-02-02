@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/urfave/cli-altsrc/v3"
+	altsrc "github.com/urfave/cli-altsrc/v3"
 	"github.com/urfave/cli-altsrc/v3/yaml"
 	"github.com/urfave/cli/v3"
 	etcd "go.etcd.io/etcd/client/v3"
@@ -21,6 +21,7 @@ type config struct {
 	EtcdEndpoint   string
 	EtcdUser       string
 	EtcdPassword   string
+	EtcdRootKey    string
 	TargetIP       string
 	DomainTemplate string
 	CertResolver   string
@@ -34,6 +35,7 @@ func configFromCmd(cmd *cli.Command) config {
 		EtcdEndpoint:   root.String("etcd-endpoint"),
 		EtcdUser:       root.String("etcd-user"),
 		EtcdPassword:   root.String("etcd-password"),
+		EtcdRootKey:    root.String("etcd-root-key"),
 		TargetIP:       root.String("target-ip"),
 		DomainTemplate: root.String("domain-template"),
 		CertResolver:   root.String("cert-resolver"),
@@ -92,6 +94,15 @@ func main() {
 				),
 			},
 			&cli.StringFlag{
+				Name:  "etcd-root-key",
+				Usage: "etcd key prefix for Traefik (e.g. traefik-vortex, traefik-andromeda)",
+				Value: "traefik",
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SERVE_ETCD_ROOT_KEY"),
+					yaml.YAML("serve.etcd_root_key", configFileSourcer),
+				),
+			},
+			&cli.StringFlag{
 				Name:  "target-ip",
 				Usage: "Tailscale IP of local machine for Traefik to reach",
 				Value: "127.0.0.1",
@@ -135,6 +146,10 @@ func main() {
 					yaml.YAML("serve.slug_length", configFileSourcer),
 				),
 			},
+			&cli.StringFlag{
+				Name:  "slug",
+				Usage: "app name/slug (e.g. myapp); use with run: serve --slug myapp run 8080",
+			},
 		},
 		Commands: []*cli.Command{
 			{
@@ -158,6 +173,9 @@ func main() {
 
 					port := cmd.Args().Get(0)
 					appName := cmd.String("slug")
+					if appName == "" {
+						appName = cmd.Root().String("slug")
+					}
 
 					// Generate random app name if not provided
 					if appName == "" {
@@ -302,6 +320,14 @@ func main() {
 	}
 }
 
+// etcdRoot returns the etcd key prefix for Traefik (default "traefik" if unset).
+func etcdRoot(cfg config) string {
+	if cfg.EtcdRootKey == "" {
+		return "traefik"
+	}
+	return cfg.EtcdRootKey
+}
+
 // getActiveServices scans etcd for traefik routers and services and returns a map of app_name -> port.
 func getActiveServices(cfg config) (map[string]string, error) {
 	client, err := createEtcdClient(cfg)
@@ -313,8 +339,11 @@ func getActiveServices(cfg config) (map[string]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Get all entries with prefix traefik/http/routers/
-	resp, err := client.Get(ctx, "traefik/http/routers/", etcd.WithPrefix())
+	root := etcdRoot(cfg)
+	routersPrefix := root + "/http/routers/"
+
+	// Get all entries with prefix {root}/http/routers/
+	resp, err := client.Get(ctx, routersPrefix, etcd.WithPrefix())
 	if err != nil {
 		return nil, fmt.Errorf("failed to list etcd keys: %w", err)
 	}
@@ -326,8 +355,8 @@ func getActiveServices(cfg config) (map[string]string, error) {
 	for _, kv := range resp.Kvs {
 		key := string(kv.Key)
 
-		// Remove prefix traefik/http/routers/ and get first part
-		afterPrefix := strings.TrimPrefix(key, "traefik/http/routers/")
+		// Remove prefix {root}/http/routers/ and get first part
+		afterPrefix := strings.TrimPrefix(key, routersPrefix)
 		if afterPrefix == key { // prefix wasn't found
 			continue
 		}
@@ -348,14 +377,14 @@ func getActiveServices(cfg config) (map[string]string, error) {
 	// For each router, get the service and extract port
 	for routerName := range routerNames {
 		// Get service name
-		svcResp, err := client.Get(ctx, fmt.Sprintf("traefik/http/routers/%s/service", routerName))
+		svcResp, err := client.Get(ctx, fmt.Sprintf("%s/http/routers/%s/service", root, routerName))
 		if err != nil || len(svcResp.Kvs) == 0 {
 			continue
 		}
 		serviceName := string(svcResp.Kvs[0].Value)
 
 		// Get service URL
-		serviceURLKey := fmt.Sprintf("traefik/http/services/%s/loadbalancer/servers/0/url", serviceName)
+		serviceURLKey := fmt.Sprintf("%s/http/services/%s/loadbalancer/servers/0/url", root, serviceName)
 		serviceResp, err := client.Get(ctx, serviceURLKey)
 		if err != nil || len(serviceResp.Kvs) == 0 {
 			continue
@@ -401,19 +430,20 @@ func createTraefikConfig(cfg config, appName, domain string, port string) error 
 	resName := resourceName(cfg, appName)
 	serviceURL := fmt.Sprintf("http://%s%s", cfg.TargetIP, portWithColon)
 	hostRule := fmt.Sprintf("Host(`%s`)", domain)
+	root := etcdRoot(cfg)
 
 	// Create router configuration
 	routerKeys := map[string]string{
-		fmt.Sprintf("traefik/http/routers/%s/entrypoints", resName):      "https",
-		fmt.Sprintf("traefik/http/routers/%s/tls", resName):              "true",
-		fmt.Sprintf("traefik/http/routers/%s/tls/certresolver", resName): cfg.CertResolver,
-		fmt.Sprintf("traefik/http/routers/%s/rule", resName):             hostRule,
-		fmt.Sprintf("traefik/http/routers/%s/service", resName):          resName,
+		fmt.Sprintf("%s/http/routers/%s/entrypoints", root, resName):      "https",
+		fmt.Sprintf("%s/http/routers/%s/tls", root, resName):              "true",
+		fmt.Sprintf("%s/http/routers/%s/tls/certresolver", root, resName): cfg.CertResolver,
+		fmt.Sprintf("%s/http/routers/%s/rule", root, resName):             hostRule,
+		fmt.Sprintf("%s/http/routers/%s/service", root, resName):          resName,
 	}
 
 	// Create service configuration
 	serviceKeys := map[string]string{
-		fmt.Sprintf("traefik/http/services/%s/loadbalancer/servers/0/url", resName): serviceURL,
+		fmt.Sprintf("%s/http/services/%s/loadbalancer/servers/0/url", root, resName): serviceURL,
 	}
 
 	// Store keys in etcd: service first, then routers (deterministic order)
@@ -443,15 +473,17 @@ func removeTraefikConfig(cfg config, appName string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	root := etcdRoot(cfg)
+
 	// Delete router configuration
-	routerPrefix := fmt.Sprintf("traefik/http/routers/%s/", appName)
+	routerPrefix := fmt.Sprintf("%s/http/routers/%s/", root, appName)
 	_, err = client.Delete(ctx, routerPrefix, etcd.WithPrefix())
 	if err != nil {
 		return fmt.Errorf("failed to delete router config: %w", err)
 	}
 
 	// Delete service configuration
-	servicePrefix := fmt.Sprintf("traefik/http/services/%s/", appName)
+	servicePrefix := fmt.Sprintf("%s/http/services/%s/", root, appName)
 	_, err = client.Delete(ctx, servicePrefix, etcd.WithPrefix())
 	if err != nil {
 		return fmt.Errorf("failed to delete service config: %w", err)
@@ -484,8 +516,11 @@ func findAppNameByPort(cfg config, port string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	root := etcdRoot(cfg)
+	servicesPrefix := root + "/http/services/"
+
 	// Get all service URLs
-	resp, err := client.Get(ctx, "traefik/http/services/", etcd.WithPrefix())
+	resp, err := client.Get(ctx, servicesPrefix, etcd.WithPrefix())
 	if err != nil {
 		return ""
 	}
@@ -496,14 +531,15 @@ func findAppNameByPort(cfg config, port string) string {
 		key := string(kv.Key)
 		value := string(kv.Value)
 
-		// Look for service URL keys like traefik/http/services/{app-name}/loadbalancer/servers/0/url
+		// Look for service URL keys like {root}/http/services/{app-name}/loadbalancer/servers/0/url
 		if strings.HasSuffix(key, "/loadbalancer/servers/0/url") {
 			if strings.HasSuffix(value, targetURL) {
-				// Extract app name from key like traefik/http/services/myapp/loadbalancer/servers/0/url
-				parts := strings.Split(key, "/")
-				if len(parts) >= 5 {
-					return parts[4] // app name is at index 4
+				// Extract app name: key is {root}/http/services/{appName}/loadbalancer/...
+				afterPrefix, _ := strings.CutPrefix(key, servicesPrefix)
+				if idx := strings.Index(afterPrefix, "/"); idx >= 0 {
+					return afterPrefix[:idx]
 				}
+				return afterPrefix
 			}
 		}
 	}

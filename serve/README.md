@@ -28,10 +28,12 @@ serve:
   etcd_endpoint: "localhost:2379"
   etcd_user: ""
   etcd_password: ""
+  etcd_root_key: "traefik"
   target_ip: "127.0.0.1"
   domain_template: "%s.example.com"
   cert_resolver: "lecf"
   key_prefix: "serve"
+  slug_length: 3
 ```
 
 | YAML key (under `serve:`) | Description | Default |
@@ -39,14 +41,16 @@ serve:
 | `etcd_endpoint` | etcd server endpoint | `localhost:2379` |
 | `etcd_user` | etcd username | (empty) |
 | `etcd_password` | etcd password | (empty) |
+| `etcd_root_key` | etcd key prefix for Traefik (e.g. `traefik-vortex`, `traefik-andromeda`) | `traefik` |
 | `target_ip` | Tailscale IP of your local machine (for Traefik to reach) | `127.0.0.1` |
 | `domain_template` | Domain template; use `%s` for app name (required for `run`) | (empty) |
 | `cert_resolver` | Traefik cert resolver name | `lecf` |
 | `key_prefix` | Prefix for router/service names in etcd (e.g. `serve-myapp`) | `serve` |
+| `slug_length` | Length of auto-generated slug when `--slug` is not provided | `3` |
 
-**Override via env** — Same keys as before: `SERVE_ETCD_ENDPOINT`, `SERVE_ETCD_USER`, `SERVE_ETCD_PASSWORD`, `SERVE_ETCD_TARGET_IP`, `SERVE_DOMAIN_TEMPLATE`, `SERVE_CERT_RESOLVER`, `SERVE_KEY_PREFIX`. Env overrides the config file.
+**Override via env** — `SERVE_ETCD_ENDPOINT`, `SERVE_ETCD_USER`, `SERVE_ETCD_PASSWORD`, `SERVE_ETCD_ROOT_KEY`, `SERVE_ETCD_TARGET_IP`, `SERVE_DOMAIN_TEMPLATE`, `SERVE_CERT_RESOLVER`, `SERVE_KEY_PREFIX`, `SERVE_SLUG_LENGTH`. Env overrides the config file.
 
-**Override via CLI** — Global flags: `--config` / `-c`, `--etcd-endpoint`, `--etcd-user`, `--etcd-password`, `--target-ip`, `--domain-template`, `--cert-resolver`, `--key-prefix`.
+**Override via CLI** — Global flags: `--config` / `-c`, `--etcd-endpoint`, `--etcd-user`, `--etcd-password`, `--etcd-root-key`, `--target-ip`, `--domain-template`, `--cert-resolver`, `--key-prefix`, `--slug-length`, `--slug`. Slug can be set globally (e.g. `serve --slug myapp run 8080`) or per-command.
 
 ### 2. Configure Traefik
 
@@ -94,24 +98,28 @@ Use the same `resolver` name as in your `certificatesResolvers` and in serve's `
 
 ## Usage
 
-### `run`
+### `run` (alias: `start`)
 
-Add a new service to be exposed.
+Add a new service to be exposed. Blocks until Ctrl+C unless `--detach` is used.
 
 ```bash
 serve run 8080
-# Generated app name: x7k2m9qp
-# Successfully configured x7k2m9qp.example.com to point to 100.1.2.3:8080
+# Generated app name: x7k
+# Serving at https://x7k.example.com (forwarding to :8080). Press Ctrl+C to stop and remove from Traefik.
 
-# or with custom app name
+# with custom app name (flag can be global or on run)
 serve run 8080 --slug my-cool-app
+# or: serve --slug my-cool-app run 8080
+
+# run in background (no cleanup on exit)
+serve run 8080 --slug myapp --detach
 ```
 
-- `<port>` (required): The port your local application is running on (e.g., `3000`, `8080`, `:8080`).
-- `--slug` (optional): A unique name for your application. If not provided, an 8-character random alphanumeric slug will be generated.
-- `--domain` (optional): A specific domain to use. If omitted, it uses `domain-template` (from config) with the app name.
+- `<port>` (required): The port your local application is running on (e.g. `3000`, `8080`, `:8080`).
+- `--slug` (optional): Name for your application. If not provided, a random alphanumeric slug of length `slug_length` (default 3) is generated.
+- `--detach` / `-d` (optional): Don't block; leave config in etcd when the process exits (no cleanup on Ctrl+C).
 
-This command will create entries in etcd under the `traefik/http/` prefix for routers and services (resource names use `{key_prefix}-{slug}` when the prefix is set).
+This command will create entries in etcd under `{etcd_root_key}/http/` for routers and services (resource names use `{key_prefix}-{slug}` when the prefix is set).
 
 ### `stop`
 
@@ -139,12 +147,13 @@ serve reset
 
 Use this to wipe all serve-managed entries from etcd in one go.
 
-### `status`
+### `status` (aliases: `ls`, `list`)
 
 List all currently active services managed by this utility.
 
 ```bash
 serve status
+# or: serve ls   /   serve list
 ```
 
 **Example Output:**
@@ -158,13 +167,13 @@ another-app          https://another-app.example.com          :3000
 
 ## etcd Key Structure
 
-Services are stored in etcd with the following key structure. The resource name is `{prefix}-{slug}` when `key_prefix` is set (e.g. `serve-myapp`), or just `{slug}` when the prefix is empty.
+Services are stored in etcd with the following key structure. The root is `etcd_root_key` (default `traefik`). The resource name is `{key_prefix}-{slug}` when `key_prefix` is set (e.g. `serve-myapp`), or just `{slug}` when the prefix is empty.
 
 ```
-traefik/http/routers/{prefix}-{slug}/entrypoints = "https"
-traefik/http/routers/{prefix}-{slug}/tls = "true"
-traefik/http/routers/{prefix}-{slug}/tls/certresolver = "{cert_resolver}"
-traefik/http/routers/{prefix}-{slug}/rule = "Host(`{domain from domain_template}`)"
-traefik/http/routers/{prefix}-{slug}/service = "{prefix}-{slug}"
-traefik/http/services/{prefix}-{slug}/loadbalancer/servers/0/url = "http://{target_ip}:{port}"
+{etcd_root_key}/http/routers/{res_name}/entrypoints = "https"
+{etcd_root_key}/http/routers/{res_name}/tls = "true"
+{etcd_root_key}/http/routers/{res_name}/tls/certresolver = "{cert_resolver}"
+{etcd_root_key}/http/routers/{res_name}/rule = "Host(`{domain from domain_template}`)"
+{etcd_root_key}/http/routers/{res_name}/service = "{res_name}"
+{etcd_root_key}/http/services/{res_name}/loadbalancer/servers/0/url = "http://{target_ip}:{port}"
 ``` 

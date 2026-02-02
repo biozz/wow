@@ -4,6 +4,7 @@ serve:
   etcd_endpoint: "localhost:2379"
   etcd_user: ""
   etcd_password: ""
+  etcd_root_key: "traefik"
   target_ip: "127.0.0.1"
   domain_template: "%s.example.com"
   cert_resolver: "lecf"
