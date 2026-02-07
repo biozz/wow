@@ -1,3 +1,4 @@
 .env
 serve.yaml
 serve-*.yaml
+bin/
