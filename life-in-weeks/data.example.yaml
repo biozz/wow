@@ -1,0 +1,11 @@
+birthDate: "1990-08-28"
+events:
+  - year: 2026
+    text: "Event for the whole year"
+  - year: 2026
+    month: 1
+    text: "Event for January"
+  - year: 2026
+    month: 1
+    day: 15
+    text: "Event for a specific day"

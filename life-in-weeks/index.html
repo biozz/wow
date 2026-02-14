@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Life in Weeks</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        color-scheme: dark light;
+        --bg: #050712;
+        --bg-elevated: #0b0f1f;
+        --border-subtle: rgba(255, 255, 255, 0.06);
+        --accent: #ffb703;
+        --text-main: #f5f5f7;
+        --text-muted: #9ca3af;
+        --week-gap: 0;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+          sans-serif;
+        background: radial-gradient(circle at top, #111827, var(--bg));
+        color: var(--text-main);
+      }
+
+      body {
+        display: flex;
+      }
+
+      .app {
+        display: flex;
+        flex-direction: row;
+        align-items: stretch;
+        justify-content: stretch;
+        width: 100%;
+        height: 100vh;
+      }
+
+      .grid-panel {
+        flex: 1 1 auto;
+        padding: 12px 16px;
+        display: flex;
+        align-items: stretch;
+        justify-content: center;
+        overflow-y: auto;
+        overflow-x: hidden;
+        background: radial-gradient(circle at top left, #111827, #020617);
+        min-height: 0;
+      }
+
+      .grid-with-labels {
+        display: flex;
+        flex-direction: row;
+        align-items: flex-start;
+        gap: 10px;
+      }
+
+      .year-labels {
+        flex: 0 0 auto;
+        display: grid;
+        grid-template-columns: 1fr;
+        grid-auto-rows: var(--weekSize);
+        gap: var(--week-gap);
+        padding: 8px 0;
+        font-size: calc(0.95rem * var(--zoom-factor, 1));
+        font-weight: bold;
+        color: var(--text-muted);
+        line-height: 1;
+      }
+
+      .year-label {
+        display: flex;
+        align-items: center;
+        padding-right: 6px;
+        text-align: right;
+        justify-content: flex-end;
+      }
+
+      .zoom-controls {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .zoom-toggle {
+        padding: 4px 10px;
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.6);
+        background: rgba(15, 23, 42, 0.9);
+        color: var(--text-main);
+        font-size: 0.75rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        cursor: pointer;
+      }
+
+      .zoom-toggle:hover {
+        border-color: rgba(248, 250, 252, 0.9);
+        background: rgba(30, 64, 175, 0.9);
+      }
+
+      .zoom-toggle:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .zoom-label {
+        cursor: default;
+        min-width: 2.5rem;
+        text-align: center;
+      }
+
+      .life-grid {
+        --weekSize: 4px;
+        --weeksPerRow: 26;
+        display: grid;
+        grid-template-columns: repeat(
+          var(--weeksPerRow),
+          calc(var(--weekSize) * 1.6)
+        );
+        grid-auto-rows: var(--weekSize);
+        gap: var(--week-gap);
+        align-content: stretch;
+        justify-content: center;
+        width: 100%;
+        height: auto;
+        padding: 8px;
+        border-radius: 10px;
+        background: radial-gradient(circle at top left, #111827, #020617);
+        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5) inset;
+        overflow: visible;
+      }
+
+      .week {
+        border-radius: 3px;
+        background-color: rgba(148, 163, 184, 0.2);
+        border: 1px solid rgba(15, 23, 42, 0.8);
+        transition:
+          transform 80ms ease-out,
+          box-shadow 80ms ease-out,
+          border-color 80ms ease-out,
+          background-color 80ms ease-out;
+      }
+
+      .week.birthday {
+        box-shadow:
+          0 0 0 1px rgba(255, 183, 3, 0.7),
+          0 0 4px 1px rgba(255, 183, 3, 0.25);
+        border-color: rgba(255, 183, 3, 0.8);
+      }
+
+      .week.pre-birth {
+        background-color: rgba(71, 85, 105, 0.25);
+        border-color: rgba(30, 41, 59, 0.8);
+        opacity: 0.7;
+      }
+
+      .week.pre-birth[data-year-color] {
+        background-color: color-mix(
+          in srgb,
+          rgba(30, 41, 59, 0.9) 70%,
+          var(--year-color) 30%
+        );
+      }
+
+      .week[data-year-color] {
+        background-color: color-mix(
+          in srgb,
+          rgba(15, 23, 42, 1) 55%,
+          var(--year-color) 45%
+        );
+      }
+
+      .week.has-events {
+        border-color: rgba(251, 191, 36, 0.7);
+      }
+
+      .week.current {
+        box-shadow:
+          0 0 0 1px rgba(255, 255, 255, 0.85),
+          0 0 0 4px rgba(248, 250, 252, 0.3);
+        border-color: #f9fafb;
+      }
+
+      .week:hover {
+        transform: scale(1.2);
+        z-index: 2;
+        box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.6);
+        border-color: rgba(255, 255, 255, 0.9);
+      }
+
+      .detail-panel {
+        flex: 0 0 28rem;
+        max-width: 34%;
+        padding: 16px 20px;
+        border-left: 1px solid var(--border-subtle);
+        background: linear-gradient(
+          to bottom right,
+          rgba(15, 23, 42, 0.95),
+          rgba(12, 10, 25, 0.98)
+        );
+        display: flex;
+        flex-direction: column;
+        row-gap: 16px;
+        overflow: hidden;
+      }
+
+      .detail-header {
+        border-bottom: 1px solid var(--border-subtle);
+        padding-bottom: 10px;
+        margin-bottom: 4px;
+      }
+
+      .detail-heading {
+        font-size: 0.8rem;
+        font-weight: 600;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        margin-bottom: 6px;
+      }
+
+      .detail-date {
+        font-size: 1.2rem;
+        font-weight: 600;
+      }
+
+      .detail-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 12px;
+        margin-top: 6px;
+        font-size: 0.8rem;
+        color: var(--text-muted);
+      }
+
+      .detail-badge {
+        padding: 2px 8px;
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.4);
+        background: rgba(15, 23, 42, 0.8);
+      }
+
+      .events-scroll {
+        flex: 1 1 auto;
+        overflow-y: auto;
+        padding-right: 4px;
+      }
+
+      .events-empty {
+        font-size: 0.9rem;
+        color: var(--text-muted);
+        font-style: italic;
+        margin-top: 4px;
+      }
+
+      .event-group-title {
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.16em;
+        color: var(--text-muted);
+        margin: 12px 0 4px;
+      }
+
+      .event-item {
+        padding: 6px 8px;
+        border-radius: 6px;
+        background: rgba(15, 23, 42, 0.9);
+        border: 1px solid rgba(31, 41, 55, 0.9);
+        font-size: 0.9rem;
+        line-height: 1.35;
+        margin-bottom: 6px;
+        white-space: pre-wrap;
+      }
+
+      .detail-footer {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        border-top: 1px solid var(--border-subtle);
+        padding-top: 8px;
+        margin-top: 4px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .detail-footer code {
+        font-size: 0.75rem;
+      }
+
+      @media (max-width: 900px) {
+        .app {
+          flex-direction: column;
+        }
+
+        .grid-panel {
+          max-height: 60vh;
+        }
+
+        .detail-panel {
+          flex: 0 0 auto;
+          max-width: 100%;
+          border-left: none;
+          border-top: 1px solid var(--border-subtle);
+          padding: 12px 14px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="grid-panel">
+        <div class="grid-with-labels" data-role="grid-with-labels">
+          <div class="year-labels" data-role="year-labels"></div>
+          <div
+            class="life-grid"
+            data-role="life-grid"
+            aria-label="Life in weeks grid"
+          ></div>
+        </div>
+      </div>
+      <aside class="detail-panel">
+        <header class="detail-header">
+          <div class="detail-heading">Hovered week</div>
+          <div
+            class="detail-date"
+            data-role="detail-date"
+          >
+            Hover a week to see details
+          </div>
+          <div class="detail-meta">
+            <span
+              class="detail-badge"
+              data-role="detail-year"
+            ></span>
+            <span
+              class="detail-badge"
+              data-role="detail-month"
+            ></span>
+            <span
+              class="detail-badge"
+              data-role="detail-week-index"
+            ></span>
+            <span
+              class="detail-badge"
+              data-role="detail-age"
+            ></span>
+          </div>
+        </header>
+        <div class="events-scroll">
+          <div
+            class="events-empty"
+            data-role="events-empty"
+          >
+            No events for this week.
+          </div>
+          <div
+            class="events-groups"
+            data-role="events-groups"
+          ></div>
+        </div>
+        <footer class="detail-footer">
+          <span></span>
+          <div class="zoom-controls">
+            <button
+              type="button"
+              class="zoom-toggle"
+              data-role="zoom-out"
+              aria-label="Zoom out"
+            >−</button>
+            <span class="zoom-toggle zoom-label" data-role="zoom-label" aria-live="polite">1×</span>
+            <button
+              type="button"
+              class="zoom-toggle"
+              data-role="zoom-in"
+              aria-label="Zoom in"
+            >+</button>
+          </div>
+        </footer>
+      </aside>
+    </div>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
